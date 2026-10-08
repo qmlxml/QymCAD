@@ -304,6 +304,7 @@ io-stl-too-many-triangles = STL: забагато трикутників
 io-stl-write-failed = STL: запис не вдався: { $v }
 
 io-svg-empty-sketch = SVG: порожній ескіз
+io-svg-too-deep = SVG: малюнок вкладено глибше ніж на { $v } рівнів, і він не читається
 io-svg-write-failed = SVG: запис не вдався: { $v }
 io-dxf-empty-sketch = DXF: порожній ескіз
 io-dxf-write-failed = DXF: запис не вдався: { $v }

@@ -304,6 +304,7 @@ io-stl-too-many-triangles = STL: too many triangles
 io-stl-write-failed = STL: writing failed: { $v }
 
 io-svg-empty-sketch = SVG: the sketch is empty
+io-svg-too-deep = SVG: the drawing is nested deeper than { $v } levels and is not read
 io-svg-write-failed = SVG: writing failed: { $v }
 io-dxf-empty-sketch = DXF: the sketch is empty
 io-dxf-write-failed = DXF: writing failed: { $v }
