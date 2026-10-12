@@ -1533,59 +1533,112 @@ pub(crate) fn save_template_dialog(wc: &mut qymcad_ui_state::WinCtx, ctx: &egui:
 
 pub(crate) fn doc_props_window(wc: &mut qymcad_ui_state::WinCtx, ctx: &egui::Context) {
     if !wc.win.is(WinKind::DocProps) {
+        // closed with a field still holding the keyboard: no field reports losing it, so the edit is closed here
+        props_typing_ends(wc);
         return;
     }
     let mut open = wc.win.is(WinKind::DocProps);
-    egui::Window::new(format!("{} {}", ph::FILE_TEXT, crate::i18n::tr("doc-props-title"))).id(egui::Id::new("win_doc_props")).open(&mut open).resizable(true).default_width(420.0).show(ctx, |ui| {
-        egui::Grid::new("doc_props").num_columns(2).spacing([8.0, 6.0]).show(ui, |ui| {
-            ui.label(crate::i18n::tr("doc-props-name"));
-            ui.text_edit_singleline(&mut wc.project.meta.title);
-            ui.end_row();
-            ui.label(crate::i18n::tr("doc-props-author"));
-            ui.text_edit_singleline(&mut wc.project.meta.author);
-            ui.end_row();
-            ui.label(crate::i18n::tr("doc-props-version"));
-            ui.text_edit_singleline(&mut wc.project.meta.version);
-            ui.end_row();
-        });
-        ui.label(crate::i18n::tr("doc-props-comment"));
-        ui.add(egui::TextEdit::multiline(&mut wc.project.meta.comment).desired_rows(4).desired_width(f32::INFINITY));
-        ui.separator();
-        // THE GEOMETRY TOLERANCE LIVES HERE, NOT IN THE PROGRAM'S SETTINGS. Both the look on screen and the
-        // contents of an STL depend on it: were it a program setting, one file would export differently for
-        // two people, and both would be sure the program was lying.
-        ui.label(egui::RichText::new(crate::i18n::tr("doc-props-quality")).strong());
-        ui.horizontal_wrapped(|ui| {
-            for q in qymcad_core::model::GeomQuality::all() {
-                if ui.selectable_label(wc.project.geom_quality == q, crate::i18n::tr(q.label_key())).clicked() && wc.project.geom_quality != q {
-                    qymcad_ui_state::begin_edit(&mut *wc.edits, &*wc.project, crate::i18n::tr("doc-props-quality")); // THE EDIT BOUNDARY: this changes the document and can be undone
-                    wc.project.geom_quality = q;
-                    // the geometry must be recomputed: the tolerance changes THE MESH, not just a number
-                    wc.project.mark_bodies_dirty();
-                    qymcad_ui_state::commit_edit(&mut wc.rebuild());
-                    qymcad_ui_state::mark_dirty_for_rebuild(&mut wc.rebuild());
-                }
+    // THE TITLE, AUTHOR, VERSION AND COMMENT ARE TYPED AS ONE STEP OF UNDO. They used to be written straight into the
+    // document, outside any edit, and, measured through the window, a title typed and left with Escape made no step at
+    // all: while a field holds the keyboard the operation guard (`maybe_commit`) does not look, and the next frame's
+    // `rebuild_if_dirty`, finding nothing to rebuild, took the changed document as committed - so the guard never saw
+    // the change. Now the first field to take the keyboard opens an edit named for the window, and it closes - a step
+    // only if something changed - when no field holds the keyboard any more, so typing in several fields in turn is
+    // one step. (Opened inside an edit already open, it is part of that one.)
+    let shown = egui::Window::new(format!("{} {}", ph::FILE_TEXT, crate::i18n::tr("doc-props-title"))).id(egui::Id::new("win_doc_props")).open(&mut open).resizable(true).default_width(420.0).show(
+        ctx,
+        |ui| {
+            let mut typing = false;
+            egui::Grid::new("doc_props").num_columns(2).spacing([8.0, 6.0]).show(ui, |ui| {
+                ui.label(crate::i18n::tr("doc-props-name"));
+                typing |= props_field(ui.text_edit_singleline(&mut wc.project.meta.title), wc);
+                ui.end_row();
+                ui.label(crate::i18n::tr("doc-props-author"));
+                typing |= props_field(ui.text_edit_singleline(&mut wc.project.meta.author), wc);
+                ui.end_row();
+                ui.label(crate::i18n::tr("doc-props-version"));
+                typing |= props_field(ui.text_edit_singleline(&mut wc.project.meta.version), wc);
+                ui.end_row();
+            });
+            ui.label(crate::i18n::tr("doc-props-comment"));
+            typing |= props_field(ui.add(egui::TextEdit::multiline(&mut wc.project.meta.comment).desired_rows(4).desired_width(f32::INFINITY)), wc);
+            // closed before the quality below, which is a step of its own
+            if !typing {
+                props_typing_ends(wc);
             }
-        });
-        ui.label(egui::RichText::new(crate::i18n::tr("doc-props-quality-hint")).weak().small());
-        ui.separator();
-        // THE FACTS THE PROGRAM KNOWS BY ITSELF - they are read, not edited
-        let created = wc.project.meta.created.clone();
-        ui.label(egui::RichText::new(if created.is_empty() { crate::i18n::tr("doc-props-not-saved-yet") } else { crate::i18n::tr1("doc-props-created", "when", &created) }).small().weak());
-        let counts = crate::i18n::tr2("doc-props-counts", "parts", &wc.project.components.len().to_string(), "bodies", &wc.project.bodies.len().to_string());
-        ui.label(egui::RichText::new(counts).small().weak());
-        if let Some(p) = wc.project_path.clone() {
-            ui.label(egui::RichText::new(crate::i18n::tr1("doc-props-path", "path", &p)).small().weak());
+            ui.separator();
+            // THE GEOMETRY TOLERANCE LIVES HERE, NOT IN THE PROGRAM'S SETTINGS. Both the look on screen and the
+            // contents of an STL depend on it: were it a program setting, one file would export differently for
+            // two people, and both would be sure the program was lying.
+            ui.label(egui::RichText::new(crate::i18n::tr("doc-props-quality")).strong());
+            ui.horizontal_wrapped(|ui| {
+                for q in qymcad_core::model::GeomQuality::all() {
+                    if ui.selectable_label(wc.project.geom_quality == q, crate::i18n::tr(q.label_key())).clicked() && wc.project.geom_quality != q {
+                        qymcad_ui_state::begin_edit(&mut *wc.edits, &*wc.project, crate::i18n::tr("doc-props-quality")); // THE EDIT BOUNDARY: this changes the document and can be undone
+                        wc.project.geom_quality = q;
+                        // the geometry must be recomputed: the tolerance changes THE MESH, not just a number
+                        wc.project.mark_bodies_dirty();
+                        qymcad_ui_state::commit_edit(&mut wc.rebuild());
+                        qymcad_ui_state::mark_dirty_for_rebuild(&mut wc.rebuild());
+                    }
+                }
+            });
+            ui.label(egui::RichText::new(crate::i18n::tr("doc-props-quality-hint")).weak().small());
+            ui.separator();
+            // THE FACTS THE PROGRAM KNOWS BY ITSELF - they are read, not edited
+            let created = wc.project.meta.created.clone();
+            ui.label(egui::RichText::new(if created.is_empty() { crate::i18n::tr("doc-props-not-saved-yet") } else { crate::i18n::tr1("doc-props-created", "when", &created) }).small().weak());
+            let counts = crate::i18n::tr2("doc-props-counts", "parts", &wc.project.components.len().to_string(), "bodies", &wc.project.bodies.len().to_string());
+            ui.label(egui::RichText::new(counts).small().weak());
+            if let Some(p) = wc.project_path.clone() {
+                ui.label(egui::RichText::new(crate::i18n::tr1("doc-props-path", "path", &p)).small().weak());
+            }
+            // WHICH BUILD WROTE THIS FILE. Shown, not editable: it is the program's word about itself,
+            // and the person's own version lives in the field above. Empty for a document that has
+            // never been saved, and then there is nothing to say.
+            if !wc.project.meta.saved_by.is_empty() {
+                let by = wc.project.meta.saved_by.clone();
+                ui.label(egui::RichText::new(crate::i18n::tr1("doc-props-saved-by", "build", &by)).small().weak());
+            }
+        },
+    );
+    // A PRESS OUTSIDE THE WINDOW ENDS THE TYPING. egui gives a field's keyboard away only on a click, so a part dragged
+    // in the viewport while the title held it nested its move inside this edit, and the step came out named for the
+    // properties with the move in it. The window is drawn before the viewport, so the typing is over before the drag
+    // begins.
+    let pressed_outside = ctx.input(|i| i.pointer.any_pressed() && i.pointer.press_origin().is_some_and(|p| shown.as_ref().is_none_or(|w| !w.response.rect.contains(p))));
+    // a window collapsed (its fields not drawn) holds no typing either
+    let collapsed = shown.as_ref().is_none_or(|w| w.inner.is_none());
+    if wc.win.props_typing && (pressed_outside || collapsed) {
+        if let Some(id) = ctx.memory(|m| m.focused()) {
+            ctx.memory_mut(|m| m.surrender_focus(id));
         }
-        // WHICH BUILD WROTE THIS FILE. Shown, not editable: it is the program's word about itself,
-        // and the person's own version lives in the field above. Empty for a document that has
-        // never been saved, and then there is nothing to say.
-        if !wc.project.meta.saved_by.is_empty() {
-            let by = wc.project.meta.saved_by.clone();
-            ui.label(egui::RichText::new(crate::i18n::tr1("doc-props-saved-by", "build", &by)).small().weak());
-        }
-    });
+        props_typing_ends(wc);
+    }
     wc.win.set(WinKind::DocProps, open);
+}
+
+/// A field of the properties window: the first to take the keyboard opens the edit typing goes into. Whether it holds
+/// the keyboard now.
+fn props_field(r: egui::Response, wc: &mut qymcad_ui_state::WinCtx) -> bool {
+    // the keyboard as egui remembers it, not `has_focus`, which also asks whether the program's window is the active
+    // one: switching to another program and back would split the typing into two steps. (Opened inside an edit that is
+    // already open, this one is part of it, and closing it closes nothing of its own.)
+    let holds = r.ctx.memory(|m| m.has_focus(r.id));
+    // ... and no edit open any more is a new start: a document opened or begun meanwhile resets the edits, not this
+    if holds && (!wc.win.props_typing || wc.edits.open.is_none()) {
+        qymcad_ui_state::begin_edit(&mut *wc.edits, &*wc.project, crate::i18n::tr("doc-props-title"));
+        wc.win.props_typing = true;
+    }
+    holds
+}
+
+/// The edit the properties window opened for typing is closed: a step of undo if the typing changed something, none
+/// if it did not.
+fn props_typing_ends(wc: &mut qymcad_ui_state::WinCtx) {
+    if std::mem::take(&mut wc.win.props_typing) {
+        qymcad_ui_state::commit_edit_if_changed(&mut wc.rebuild());
+    }
 }
 
 /// The modal "save the changes?" dialogue - drawn for as long as a navigation is pending.

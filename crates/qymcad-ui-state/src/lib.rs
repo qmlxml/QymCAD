@@ -330,6 +330,10 @@ pub struct Windows {
     pub help: HelpWin,
     /// The name typed into the "save as a template" dialogue.
     pub tpl_name: String,
+    /// THE DOCUMENT'S PROPERTIES ARE BEING TYPED: the properties window opened an edit when one of its fields took the
+    /// keyboard, and closes it when no field holds it any more - or when the window is closed with a field still
+    /// holding it, which no field reports.
+    pub props_typing: bool,
     /// THE START SCREEN WAS OPENED ON REQUEST - from the Windows menu rather than by itself.
     ///
     /// NOT A WINDOW, hence not in the set: it says HOW `WinKind::Start` came up. The rule "do not show it over
